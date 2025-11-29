@@ -98,16 +98,69 @@
     .terminal-output::-webkit-scrollbar-thumb:hover {
       background: #4a4a4a;
     }
+    .terminal-tabs {
+      background: #252525;
+      border-bottom: 1px solid #3a3a3a;
+      display: flex;
+      align-items: center;
+      overflow-x: auto;
+    }
+    .terminal-tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      background: #2a2a2a;
+      border-right: 1px solid #3a3a3a;
+    }
+    .terminal-tab:hover {
+      background: #333;
+    }
+    .terminal-tab.active {
+      border-bottom-color: #4ade80;
+      background: #1a1a1a;
+    }
+    .terminal-tab-close {
+      opacity: 0.6;
+      font-size: 14px;
+      margin-left: 4px;
+    }
+    .terminal-tab-close:hover {
+      opacity: 1;
+      color: #ff5f56;
+    }
+    .terminal-new-tab {
+      padding: 8px 12px;
+      background: transparent;
+      border: none;
+      color: #4ade80;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    .terminal-new-tab:hover {
+      background: #2a2a2a;
+    }
   </style>
 </head>
 <body>
   <div class="terminal-header">
     <div class="terminal-title">📟 Sequential-OS Terminal</div>
     <div class="terminal-controls">
-      <button onclick="clearOutput()">Clear</button>
+      <button onclick="clearCurrentTab()">Clear</button>
       <button onclick="showHistory()">History</button>
       <button onclick="showStatus()">Status</button>
     </div>
+  </div>
+  <div class="terminal-tabs" id="tabs">
+    <div class="terminal-tab active" data-tab-id="1" onclick="switchTab(1)">
+      <span>Terminal 1</span>
+      <span class="terminal-tab-close" onclick="closeTab(event, 1)">×</span>
+    </div>
+    <button class="terminal-new-tab" onclick="newTab()">+</button>
   </div>
   <div class="terminal-output" id="output"></div>
   <div class="terminal-input-container">
@@ -119,25 +172,187 @@
     const outputEl = document.getElementById('output');
     const inputEl = document.getElementById('input');
     const promptEl = document.getElementById('prompt');
-    let commandHistory = [];
-    let historyIndex = -1;
+
+    let sessions = {
+      1: {
+        id: 1,
+        name: 'Terminal 1',
+        branch: 'main',
+        currentLayer: null,
+        layerHistory: [],
+        historyIndex: -1,
+        history: [],
+        output: []
+      }
+    };
+    let currentTabId = 1;
+    let nextTabId = 2;
+
+    const BUILTIN_COMMANDS = ['help', 'history', 'layers', 'branches', 'checkout', 'branch', 'clear'];
+    const AVAILABLE_COMMANDS = [...BUILTIN_COMMANDS, 'status', 'tags'];
+
+    function loadSessions() {
+      const saved = localStorage.getItem('terminal-sessions');
+      if (saved) {
+        try {
+          const data = JSON.parse(saved);
+          sessions = data.sessions;
+          nextTabId = data.nextTabId;
+          currentTabId = Number(data.currentTabId || Object.keys(sessions)[0]);
+
+          Object.values(sessions).forEach(session => {
+            if (!session.branch) session.branch = 'main';
+            if (!session.currentLayer) session.currentLayer = null;
+            if (!session.layerHistory) session.layerHistory = [];
+          });
+        } catch (e) {
+          sessions = {
+            1: {
+              id: 1,
+              name: 'Terminal 1',
+              branch: 'main',
+              currentLayer: null,
+              layerHistory: [],
+              historyIndex: -1,
+              history: [],
+              output: []
+            }
+          };
+          currentTabId = 1;
+          nextTabId = 2;
+        }
+      }
+    }
+
+    function saveSessions() {
+      localStorage.setItem('terminal-sessions', JSON.stringify({
+        sessions,
+        nextTabId,
+        currentTabId
+      }));
+    }
+
+    function getCurrentSession() {
+      return sessions[currentTabId];
+    }
+
+    function updatePrompt() {
+      const session = getCurrentSession();
+      if (session.currentLayer) {
+        const shortHash = session.currentLayer.substring(0, 8);
+        promptEl.textContent = `[${session.branch}:${shortHash}] $`;
+      } else {
+        promptEl.textContent = `[${session.branch}] $`;
+      }
+    }
 
     function addOutput(content, type = 'info') {
-      const line = document.createElement('div');
-      line.className = `terminal-line ${type}`;
-      line.textContent = content;
-      outputEl.appendChild(line);
+      const session = getCurrentSession();
+      const line = { content, type, timestamp: Date.now() };
+      session.output.push(line);
+      renderOutput();
+      saveSessions();
+    }
+
+    function renderOutput() {
+      const session = getCurrentSession();
+      outputEl.innerHTML = '';
+      session.output.forEach(line => {
+        const el = document.createElement('div');
+        el.className = `terminal-line ${line.type}`;
+        el.textContent = line.content;
+        outputEl.appendChild(el);
+      });
       outputEl.scrollTop = outputEl.scrollHeight;
     }
 
-    function clearOutput() {
-      outputEl.innerHTML = '';
+    function clearCurrentTab() {
+      const session = getCurrentSession();
+      session.output = [];
+      renderOutput();
       addOutput('Terminal cleared', 'info');
     }
 
+    function newTab() {
+      const id = nextTabId++;
+      const branchName = `branch-${id}`;
+      sessions[id] = {
+        id,
+        name: `Terminal ${id}`,
+        branch: branchName,
+        currentLayer: null,
+        layerHistory: [],
+        historyIndex: -1,
+        history: [],
+        output: []
+      };
+      currentTabId = id;
+      renderTabs();
+      renderOutput();
+      updatePrompt();
+      addOutput('Sequential-OS Terminal ready', 'success');
+      addOutput(`Branch: ${branchName}`, 'info');
+      addOutput('All commands create layers. Type "help" for commands', 'info');
+      inputEl.focus();
+      saveSessions();
+    }
+
+    function closeTab(event, tabId) {
+      event.stopPropagation();
+      const tabIds = Object.keys(sessions).map(Number);
+      if (tabIds.length === 1) {
+        addOutput('Cannot close last tab', 'error');
+        return;
+      }
+
+      delete sessions[tabId];
+
+      if (currentTabId === tabId) {
+        currentTabId = tabIds.find(id => id !== tabId);
+      }
+
+      renderTabs();
+      renderOutput();
+      saveSessions();
+    }
+
+    function switchTab(tabId) {
+      currentTabId = tabId;
+      renderTabs();
+      renderOutput();
+      updatePrompt();
+      const session = getCurrentSession();
+      session.historyIndex = -1;
+      inputEl.value = '';
+      inputEl.focus();
+      saveSessions();
+    }
+
+    function renderTabs() {
+      const tabsContainer = document.getElementById('tabs');
+      const newTabBtn = tabsContainer.querySelector('.terminal-new-tab');
+
+      tabsContainer.innerHTML = '';
+
+      Object.values(sessions).forEach(session => {
+        const tab = document.createElement('div');
+        tab.className = `terminal-tab ${session.id === currentTabId ? 'active' : ''}`;
+        tab.dataset.tabId = session.id;
+        tab.onclick = () => switchTab(session.id);
+        tab.innerHTML = `
+          <span>${session.name}</span>
+          <span class="terminal-tab-close" onclick="closeTab(event, ${session.id})">×</span>
+        `;
+        tabsContainer.appendChild(tab);
+      });
+
+      tabsContainer.appendChild(newTabBtn);
+    }
+
     function showHistory() {
+      const session = getCurrentSession();
       addOutput('--- Command History ---', 'info');
-      commandHistory.forEach((cmd, i) => {
+      session.history.forEach((cmd, i) => {
         addOutput(`${i + 1}. ${cmd}`, 'command');
       });
     }
@@ -159,25 +374,35 @@
     async function executeCommand(cmd) {
       if (!cmd.trim()) return;
 
-      commandHistory.push(cmd);
-      historyIndex = -1;
+      const session = getCurrentSession();
+      session.history.push(cmd);
+      session.historyIndex = -1;
+      saveSessions();
       addOutput(`$ ${cmd}`, 'command');
 
       if (cmd === 'help') {
-        addOutput('Available commands:', 'info');
-        addOutput('  status    - Show Sequential-OS status', 'info');
-        addOutput('  history   - Show command history', 'info');
-        addOutput('  tags      - List all tags', 'info');
-        addOutput('  clear     - Clear terminal', 'info');
-        addOutput('  help      - Show this help', 'info');
+        addOutput('=== Sequential-OS Terminal ===', 'info');
+        addOutput('Every command creates a layer (snapshot).', 'info');
         addOutput('', 'info');
-        addOutput('Run shell commands:', 'info');
-        addOutput('  run <cmd> - Execute and capture state', 'success');
+        addOutput('Builtin commands:', 'info');
+        addOutput('  help      - Show this help', 'info');
+        addOutput('  status    - Show filesystem status', 'info');
+        addOutput('  layers    - Show layer history', 'info');
+        addOutput('  branches  - List all branches', 'info');
+        addOutput('  checkout <hash> - Switch to layer', 'info');
+        addOutput('  branch <name>   - Create named branch', 'info');
+        addOutput('  tags      - List all tags', 'info');
+        addOutput('  history   - Command history', 'info');
+        addOutput('  clear     - Clear terminal', 'info');
+        addOutput('', 'info');
+        addOutput('All other commands execute as layers:', 'success');
+        addOutput('  ls -la    - Creates layer, shows output', 'success');
+        addOutput('  mkdir test - Creates layer, makes directory', 'success');
         return;
       }
 
       if (cmd === 'clear') {
-        clearOutput();
+        clearCurrentTab();
         return;
       }
 
@@ -191,38 +416,40 @@
         return;
       }
 
+      if (cmd === 'layers') {
+        addOutput('--- Layer History ---', 'info');
+        if (session.layerHistory.length === 0) {
+          addOutput('No layers yet', 'info');
+        } else {
+          session.layerHistory.forEach((layer, i) => {
+            const marker = layer.hash === session.currentLayer ? '*' : ' ';
+            addOutput(`${marker} ${i + 1}. ${layer.hash.substring(0, 8)} - ${layer.command}`, 'info');
+          });
+        }
+        return;
+      }
+
+      if (cmd === 'branches') {
+        addOutput('--- Branches ---', 'info');
+        Object.values(sessions).forEach(s => {
+          const marker = s.id === currentTabId ? '*' : ' ';
+          const layerInfo = s.currentLayer ? s.currentLayer.substring(0, 8) : 'no layers';
+          addOutput(`${marker} ${s.branch} (${layerInfo})`, 'success');
+        });
+        return;
+      }
+
       if (cmd === 'tags') {
         try {
           const res = await fetch('/api/sequential-os/tags');
           const tags = await res.json();
           addOutput('--- Tags ---', 'info');
-          Object.entries(tags).forEach(([name, ref]) => {
-            addOutput(`${name}: ${ref}`, 'success');
-          });
-        } catch (error) {
-          addOutput(`Error: ${error.message}`, 'error');
-        }
-        return;
-      }
-
-      if (cmd.startsWith('run ')) {
-        const instruction = cmd.substring(4).trim();
-        try {
-          addOutput(`Executing: ${instruction}`, 'info');
-          const res = await fetch('/api/sequential-os/run', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({instruction})
-          });
-          const data = await res.json();
-          if (data.error) {
-            addOutput(`Error: ${data.error}`, 'error');
+          if (Object.keys(tags).length === 0) {
+            addOutput('No tags', 'info');
           } else {
-            addOutput(`Layer: ${data.short}`, 'success');
-            addOutput(`Output: ${data.stdout || '(none)'}`, 'info');
-            if (data.stderr) {
-              addOutput(`Stderr: ${data.stderr}`, 'error');
-            }
+            Object.entries(tags).forEach(([name, ref]) => {
+              addOutput(`${name}: ${ref}`, 'success');
+            });
           }
         } catch (error) {
           addOutput(`Error: ${error.message}`, 'error');
@@ -230,8 +457,81 @@
         return;
       }
 
-      addOutput(`Unknown command: ${cmd}`, 'error');
-      addOutput('Type "help" for available commands', 'info');
+      if (cmd.startsWith('checkout ')) {
+        const hash = cmd.substring(9).trim();
+        try {
+          const res = await fetch('/api/sequential-os/checkout', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ref: hash})
+          });
+          const data = await res.json();
+          if (data.success) {
+            session.currentLayer = hash;
+            updatePrompt();
+            addOutput(`Checked out layer ${hash.substring(0, 8)}`, 'success');
+            saveSessions();
+          } else {
+            addOutput(`Checkout failed: ${data.error || 'unknown error'}`, 'error');
+          }
+        } catch (error) {
+          addOutput(`Error: ${error.message}`, 'error');
+        }
+        return;
+      }
+
+      if (cmd.startsWith('branch ')) {
+        const newBranch = cmd.substring(7).trim();
+        if (!newBranch) {
+          addOutput('Usage: branch <name>', 'error');
+          return;
+        }
+        session.branch = newBranch;
+        updatePrompt();
+        addOutput(`Created branch: ${newBranch}`, 'success');
+        saveSessions();
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/sequential-os/run', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({instruction: cmd})
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          addOutput(`Error: ${data.error}`, 'error');
+        } else {
+          if (data.stdout) {
+            data.stdout.split('\n').forEach(line => {
+              if (line.trim()) addOutput(line, 'info');
+            });
+          }
+          if (data.stderr) {
+            data.stderr.split('\n').forEach(line => {
+              if (line.trim()) addOutput(line, 'error');
+            });
+          }
+
+          if (data.hash) {
+            session.currentLayer = data.hash;
+            session.layerHistory.push({
+              hash: data.hash,
+              command: cmd,
+              timestamp: Date.now()
+            });
+            addOutput(`Layer: ${data.short || data.hash.substring(0, 8)}`, 'success');
+            updatePrompt();
+          } else if (data.empty) {
+            addOutput('No filesystem changes (layer not created)', 'info');
+          }
+          saveSessions();
+        }
+      } catch (error) {
+        addOutput(`Execution error: ${error.message}`, 'error');
+      }
     }
 
     inputEl.addEventListener('keydown', (e) => {
@@ -239,27 +539,51 @@
         const cmd = inputEl.value;
         inputEl.value = '';
         executeCommand(cmd);
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const input = inputEl.value.trim();
+        if (input.length > 0) {
+          const matches = AVAILABLE_COMMANDS.filter(cmd => cmd.startsWith(input));
+          if (matches.length === 1) {
+            inputEl.value = matches[0] + ' ';
+          } else if (matches.length > 1) {
+            addOutput('Available commands: ' + matches.join(', '), 'info');
+          }
+        } else {
+          addOutput('Available commands: ' + AVAILABLE_COMMANDS.join(', '), 'info');
+        }
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        if (historyIndex < commandHistory.length - 1) {
-          historyIndex++;
-          inputEl.value = commandHistory[commandHistory.length - 1 - historyIndex];
+        const session = getCurrentSession();
+        if (session.historyIndex < session.history.length - 1) {
+          session.historyIndex++;
+          inputEl.value = session.history[session.history.length - 1 - session.historyIndex];
         }
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        if (historyIndex > 0) {
-          historyIndex--;
-          inputEl.value = commandHistory[commandHistory.length - 1 - historyIndex];
-        } else if (historyIndex === 0) {
-          historyIndex = -1;
+        const session = getCurrentSession();
+        if (session.historyIndex > 0) {
+          session.historyIndex--;
+          inputEl.value = session.history[session.history.length - 1 - session.historyIndex];
+        } else if (session.historyIndex === 0) {
+          session.historyIndex = -1;
           inputEl.value = '';
         }
       }
     });
 
-    addOutput('Sequential-OS Terminal ready', 'success');
-    addOutput('Type "help" for available commands', 'info');
-    addOutput('', 'info');
+    loadSessions();
+    renderTabs();
+    renderOutput();
+    updatePrompt();
+    const session = getCurrentSession();
+    if (session && session.output.length === 0) {
+      addOutput('Sequential-OS Terminal ready', 'success');
+      addOutput(`Branch: ${session.branch}`, 'info');
+      addOutput('Every command creates a layer (snapshot)', 'info');
+      addOutput('Type "help" for commands or Tab for completion', 'info');
+      addOutput('', 'info');
+    }
     inputEl.focus();
   </script>
 </body>
