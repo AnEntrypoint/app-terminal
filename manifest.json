@@ -1,0 +1,17 @@
+{
+  "id": "app-terminal",
+  "name": "Sequential Terminal",
+  "version": "1.0.0",
+  "description": "Full CLI with layer management, tags, and command execution",
+  "icon": "📟",
+  "entry": "dist/index.html",
+  "capabilities": ["sequential-os"],
+  "window": {
+    "defaultWidth": 800,
+    "defaultHeight": 600,
+    "minWidth": 400,
+    "minHeight": 300,
+    "resizable": true,
+    "maximizable": true
+  }
+}

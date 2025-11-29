@@ -1,0 +1,10 @@
+{
+  "name": "@sequential/app-terminal",
+  "version": "1.0.0",
+  "description": "Sequential Terminal application for Sequential Desktop",
+  "main": "dist/index.html",
+  "type": "module",
+  "keywords": ["sequential", "terminal", "cli", "app"],
+  "author": "Sequential Ecosystem",
+  "license": "MIT"
+}
