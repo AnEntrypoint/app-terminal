@@ -189,7 +189,7 @@
     let nextTabId = 2;
 
     const BUILTIN_COMMANDS = ['help', 'history', 'layers', 'branches', 'checkout', 'branch', 'clear'];
-    const AVAILABLE_COMMANDS = [...BUILTIN_COMMANDS, 'status', 'tags'];
+    const AVAILABLE_COMMANDS = [...BUILTIN_COMMANDS, 'status', 'tags', 'tag'];
 
     function loadSessions() {
       const saved = localStorage.getItem('terminal-sessions');
@@ -392,6 +392,7 @@
         addOutput('  checkout <hash> - Switch to layer', 'info');
         addOutput('  branch <name>   - Create named branch', 'info');
         addOutput('  tags      - List all tags', 'info');
+        addOutput('  tag <name> - Create tag for current layer', 'info');
         addOutput('  history   - Command history', 'info');
         addOutput('  clear     - Clear terminal', 'info');
         addOutput('', 'info');
@@ -493,6 +494,34 @@
         return;
       }
 
+      if (cmd.startsWith('tag ')) {
+        const tagName = cmd.substring(4).trim();
+        if (!tagName) {
+          addOutput('Usage: tag <name>', 'error');
+          return;
+        }
+        if (!session.currentLayer) {
+          addOutput('Error: No current layer to tag. Run a command first.', 'error');
+          return;
+        }
+        try {
+          const res = await fetch('/api/sequential-os/tag', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: tagName, ref: session.currentLayer})
+          });
+          const data = await res.json();
+          if (data.success) {
+            addOutput(`Created tag "${tagName}" for layer ${session.currentLayer.substring(0, 8)}`, 'success');
+          } else {
+            addOutput(`Tag creation failed: ${data.error || 'unknown error'}`, 'error');
+          }
+        } catch (error) {
+          addOutput(`Error: ${error.message}`, 'error');
+        }
+        return;
+      }
+
       try {
         const res = await fetch('/api/sequential-os/run', {
           method: 'POST',
@@ -502,7 +531,8 @@
         const data = await res.json();
 
         if (data.error) {
-          addOutput(`Error: ${data.error}`, 'error');
+          const errorMsg = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
+          addOutput(`Error: ${errorMsg}`, 'error');
         } else {
           if (data.stdout) {
             data.stdout.split('\n').forEach(line => {
