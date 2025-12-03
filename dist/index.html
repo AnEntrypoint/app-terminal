@@ -212,33 +212,49 @@ function createStorageManager(appId) {
 }
 
     const storage = createStorageManager('app-terminal');
+    let currentTabId = 1;
+    let sessions = {};
+
     const savedState = storage.load();
     if (savedState) {
-      currentTab = savedState.currentTab || currentTab;
+      currentTabId = savedState.currentTabId || currentTabId;
       sessions = { ...sessions, ...savedState.sessions };
     }
     setInterval(() => {
-      storage.save({ currentTab, sessions });
+      storage.save({ currentTabId, sessions });
     }, 5000);
-  
+
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
 
     const outputEl = document.getElementById('output');
     const inputEl = document.getElementById('input');
     const promptEl = document.getElementById('prompt');
 
-    let sessions = {
-      1: {
-        id: 1,
-        name: 'Terminal 1',
-        branch: 'main',
-        currentLayer: null,
-        layerHistory: [],
-        historyIndex: -1,
-        history: [],
-        output: []
-      }
-    };
-    let currentTabId = 1;
+    if (!outputEl || !inputEl || !promptEl) {
+      console.error('Terminal DOM elements not found');
+      document.body.innerHTML = '<div style="color: red; padding: 20px;">Error: Terminal DOM elements not found</div>';
+    }
+
+    if (Object.keys(sessions).length === 0) {
+      sessions = {
+        1: {
+          id: 1,
+          name: 'Terminal 1',
+          branch: 'main',
+          currentLayer: null,
+          layerHistory: [],
+          historyIndex: -1,
+          history: [],
+          output: []
+        }
+      };
+    }
     let nextTabId = 2;
 
     const BUILTIN_COMMANDS = ['help', 'history', 'layers', 'branches', 'checkout', 'branch', 'clear'];
@@ -345,7 +361,7 @@ function createStorageManager(appId) {
       updatePrompt();
       addOutput('Sequential-OS Terminal ready', 'success');
       addOutput(`Branch: ${branchName}`, 'info');
-      addOutput('All commands create layers. Type "help" for commands', 'info');
+      addOutput('Layers created only when files change. Type "help" for commands', 'info');
       inputEl.focus();
       saveSessions();
     }
@@ -393,7 +409,7 @@ function createStorageManager(appId) {
         tab.dataset.tabId = session.id;
         tab.onclick = () => switchTab(session.id);
         tab.innerHTML = `
-          <span>${session.name}</span>
+          <span>${escapeHtml(session.name)}</span>
           <span class="terminal-tab-close" onclick="closeTab(event, ${session.id})">×</span>
         `;
         tabsContainer.appendChild(tab);
@@ -435,7 +451,8 @@ function createStorageManager(appId) {
 
       if (cmd === 'help') {
         addOutput('=== Sequential-OS Terminal ===', 'info');
-        addOutput('Every command creates a layer (snapshot).', 'info');
+        addOutput('Layers (snapshots) created ONLY when files change.', 'info');
+        addOutput('Read-only commands (ls, cat, pwd, echo) create no layers.', 'info');
         addOutput('', 'info');
         addOutput('Builtin commands:', 'info');
         addOutput('  help      - Show this help', 'info');
@@ -449,9 +466,13 @@ function createStorageManager(appId) {
         addOutput('  history   - Command history', 'info');
         addOutput('  clear     - Clear terminal', 'info');
         addOutput('', 'info');
-        addOutput('All other commands execute as layers:', 'success');
-        addOutput('  ls -la    - Creates layer, shows output', 'success');
+        addOutput('Commands that create layers (modify filesystem):', 'success');
         addOutput('  mkdir test - Creates layer, makes directory', 'success');
+        addOutput('  touch file - Creates layer, makes file', 'success');
+        addOutput('  echo "x" > file - Creates layer, writes to file', 'success');
+        addOutput('', 'info');
+        addOutput('Commands that do NOT create layers (read-only):', 'info');
+        addOutput('  ls, ls -la, pwd, cat, grep, find, head, tail', 'info');
         return;
       }
 
@@ -581,7 +602,17 @@ function createStorageManager(appId) {
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({instruction: cmd})
         });
+
+        if (!res.ok) {
+          addOutput(`API Error: ${res.status} ${res.statusText}`, 'error');
+          return;
+        }
+
         const data = await res.json();
+        if (!data) {
+          addOutput('No response from API', 'error');
+          return;
+        }
 
         if (data.error) {
           const errorMsg = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
@@ -663,11 +694,15 @@ function createStorageManager(appId) {
     if (session && session.output.length === 0) {
       addOutput('Sequential-OS Terminal ready', 'success');
       addOutput(`Branch: ${session.branch}`, 'info');
-      addOutput('Every command creates a layer (snapshot)', 'info');
-      addOutput('Type "help" for commands or Tab for completion', 'info');
+      addOutput('Layers created only when files change. Type "help" for commands', 'info');
       addOutput('', 'info');
     }
     inputEl.focus();
+  </script>
+  <script src="/error-handler.js"></script>
+  <script>
+    const errorHandler = new ErrorHandler('app-terminal');
+    window.errorHandler = errorHandler;
   </script>
 </body>
 </html>
